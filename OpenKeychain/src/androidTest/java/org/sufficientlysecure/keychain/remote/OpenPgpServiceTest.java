@@ -51,8 +51,6 @@ public class OpenPgpServiceTest {
         Intent serviceIntent = new Intent(InstrumentationRegistry.getTargetContext(), OpenPgpService.class);
         IBinder binder = mServiceRule.bindService(serviceIntent);
 
-        mApi = new OpenPgpApi(InstrumentationRegistry.getTargetContext(),
-                IOpenPgpService.Stub.asInterface(binder));
 
     }
 

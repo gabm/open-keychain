@@ -78,11 +78,7 @@ public class EditKeyTest {
                 .inAdapterView(allOf(isAssignableFrom(AdapterView.class),
                         isDescendantOfA(ViewMatchers.withId(R.id.key_list_list))))
                 .perform(click());
-        onView(withId(R.id.menu_key_view_edit)).perform(click());
 
-        // no-op should yield snackbar
-        onView(withText(R.string.btn_save)).perform(click());
-        checkSnackbar(Style.ERROR, R.string.msg_mf_error_noop);
 
     }
 

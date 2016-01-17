@@ -55,6 +55,7 @@ import org.sufficientlysecure.keychain.operations.results.OperationResult;
 import org.sufficientlysecure.keychain.operations.results.OperationResult.LogType;
 import org.sufficientlysecure.keychain.operations.results.OperationResult.OperationLog;
 import org.sufficientlysecure.keychain.operations.results.PgpEditKeyResult;
+import org.sufficientlysecure.keychain.pgp.exception.PgpGeneralException;
 import org.sufficientlysecure.keychain.service.SaveKeyringParcel;
 import org.sufficientlysecure.keychain.service.SaveKeyringParcel.Algorithm;
 import org.sufficientlysecure.keychain.service.SaveKeyringParcel.ChangeUnlockParcel;
@@ -343,6 +344,82 @@ public class PgpKeyOperation {
             return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
         }
 
+    }
+
+    public PgpEditKeyResult changeKeyUnlock(CanonicalizedSecretKeyRing wsKR,
+                                            CryptoInputParcel cryptoInput,
+                                            SaveKeyringParcel saveParcel)
+    {
+        OperationLog log = new OperationLog();
+        int indent = 0;
+
+        log.add(LogType.MSG_MF, indent,
+                KeyFormattingUtils.convertKeyIdToHex(wsKR.getMasterKeyId()));
+        indent += 1;
+        progress(R.string.progress_building_key, 0);
+
+        // Make sure this is called with a proper SaveKeyringParcel
+        if (saveParcel.mMasterKeyId == null || saveParcel.mMasterKeyId != wsKR.getMasterKeyId()) {
+            log.add(LogType.MSG_MF_ERROR_KEYID, indent);
+            return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+        }
+
+        // We work on bouncycastle object level here
+        PGPSecretKeyRing sKR = wsKR.getRing();
+        PGPPublicKey publicMasterKey = sKR.getPublicKey();
+        PGPSecretKey secretSignKey = null;
+        try {
+            long signID = wsKR.getSecretSignId();
+            secretSignKey = sKR.getSecretKey(signID);
+
+        } catch (PgpGeneralException e)
+        {
+            return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+        }
+
+        // Make sure the fingerprint matches
+        if (saveParcel.mFingerprint == null || !Arrays.equals(saveParcel.mFingerprint,
+                publicMasterKey.getFingerprint())) {
+            log.add(LogType.MSG_MF_ERROR_FINGERPRINT, indent);
+            return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+        }
+
+        if (saveParcel.isEmpty()) {
+            log.add(LogType.MSG_MF_ERROR_NOOP, indent);
+            return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+        }
+
+        // Do we require a passphrase? If so, pass it along
+        if (!isDivertToCard(secretSignKey) && !cryptoInput.hasPassphrase()) {
+            log.add(LogType.MSG_MF_REQUIRE_PASSPHRASE, indent);
+            return new PgpEditKeyResult(log, RequiredInputParcel.createRequiredSignPassphrase(
+                    publicMasterKey.getKeyID(), secretSignKey.getKeyID(),
+                    cryptoInput.getSignatureTime()), cryptoInput);
+        }
+
+
+        PGPPrivateKey signPrivateKey = null;
+        progress(R.string.progress_modify_unlock, 10);
+        log.add(LogType.MSG_MF_UNLOCK, indent);
+        {
+            try {
+                PBESecretKeyDecryptor keyDecryptor = new JcePBESecretKeyDecryptorBuilder().setProvider(
+                        Constants.BOUNCY_CASTLE_PROVIDER_NAME).build(cryptoInput.getPassphrase().getCharArray());
+                signPrivateKey = secretSignKey.extractPrivateKey(keyDecryptor);
+            } catch (PGPException e) {
+                log.add(LogType.MSG_MF_UNLOCK_ERROR, indent + 1);
+                return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+            }
+        }
+
+        try {
+            applyNewUnlockNew(sKR, publicMasterKey, signPrivateKey, cryptoInput.getPassphrase(), saveParcel.mNewUnlock, log, indent+1);
+        } catch (PGPException e)
+        {
+            return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+        }
+
+        return new PgpEditKeyResult(OperationResult.RESULT_OK, log, new UncachedKeyRing(sKR));
     }
 
     /** This method introduces a list of modifications specified by a SaveKeyringParcel to a

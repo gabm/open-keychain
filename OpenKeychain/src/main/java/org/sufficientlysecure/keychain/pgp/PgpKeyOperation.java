@@ -1262,6 +1262,75 @@ public class PgpKeyOperation {
 
     }
 
+    private static PGPSecretKeyRing applyNewUnlockNew(
+            PGPSecretKeyRing sKR,
+            PGPPublicKey masterPublicKey,
+            PGPPrivateKey privateSignKey,
+            Passphrase passphrase,
+            ChangeUnlockParcel newUnlock,
+            OperationLog log, int indent) throws PGPException {
+
+        if (newUnlock.mNewPassphrase != null) {
+            sKR = applyNewPassphraseNew(sKR, masterPublicKey, passphrase, newUnlock.mNewPassphrase, log, indent);
+
+            // if there is any old packet with notation data
+            if (hasNotationData(sKR)) {
+
+                log.add(LogType.MSG_MF_NOTATION_EMPTY, indent);
+
+                // add packet with EMPTY notation data (updates old one, but will be stripped later)
+                PGPContentSignerBuilder signerBuilder = new JcaPGPContentSignerBuilder(
+                        masterPublicKey.getPublicKeyPacket().getAlgorithm(),
+                        PgpSecurityConstants.SECRET_KEY_BINDING_SIGNATURE_HASH_ALGO)
+                        .setProvider(Constants.BOUNCY_CASTLE_PROVIDER_NAME);
+                PGPSignatureGenerator sGen = new PGPSignatureGenerator(signerBuilder);
+                { // set subpackets
+                    PGPSignatureSubpacketGenerator hashedPacketsGen = new PGPSignatureSubpacketGenerator();
+                    hashedPacketsGen.setExportable(false, false);
+                    sGen.setHashedSubpackets(hashedPacketsGen.generate());
+                }
+                sGen.init(PGPSignature.DIRECT_KEY, privateSignKey);
+                PGPSignature emptySig = sGen.generateCertification(masterPublicKey);
+
+                masterPublicKey = PGPPublicKey.addCertification(masterPublicKey, emptySig);
+                sKR = PGPSecretKeyRing.insertSecretKey(sKR,
+                        PGPSecretKey.replacePublicKey(sKR.getSecretKey(), masterPublicKey));
+            }
+
+            return sKR;
+        }
+
+        if (newUnlock.mNewPin != null) {
+            sKR = applyNewPassphraseNew(sKR, masterPublicKey, passphrase, newUnlock.mNewPin, log, indent);
+
+            log.add(LogType.MSG_MF_NOTATION_PIN, indent);
+
+            // add packet with "pin" notation data
+            PGPContentSignerBuilder signerBuilder = new JcaPGPContentSignerBuilder(
+                    masterPublicKey.getPublicKeyPacket().getAlgorithm(),
+                    PgpSecurityConstants.SECRET_KEY_BINDING_SIGNATURE_HASH_ALGO)
+                    .setProvider(Constants.BOUNCY_CASTLE_PROVIDER_NAME);
+            PGPSignatureGenerator sGen = new PGPSignatureGenerator(signerBuilder);
+            { // set subpackets
+                PGPSignatureSubpacketGenerator hashedPacketsGen = new PGPSignatureSubpacketGenerator();
+                hashedPacketsGen.setExportable(false, false);
+                hashedPacketsGen.setNotationData(false, true, "unlock.pin@sufficientlysecure.org", "1");
+                sGen.setHashedSubpackets(hashedPacketsGen.generate());
+            }
+            sGen.init(PGPSignature.DIRECT_KEY, privateSignKey);
+            PGPSignature emptySig = sGen.generateCertification(masterPublicKey);
+
+            masterPublicKey = PGPPublicKey.addCertification(masterPublicKey, emptySig);
+            sKR = PGPSecretKeyRing.insertSecretKey(sKR,
+                    PGPSecretKey.replacePublicKey(sKR.getSecretKey(), masterPublicKey));
+
+            return sKR;
+        }
+
+        throw new UnsupportedOperationException("PIN passphrases not yet implemented!");
+
+    }
+
     /** This method returns true iff the provided keyring has a local direct key signature
      * with notation data.
      */

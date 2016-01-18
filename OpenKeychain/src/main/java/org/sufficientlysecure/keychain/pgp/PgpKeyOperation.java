@@ -411,7 +411,7 @@ public class PgpKeyOperation {
         }
 
         try {
-            sKR = applyNewUnlockNew(sKR, publicMasterKey, signPrivateKey, cryptoInput.getPassphrase(), saveParcel.mNewUnlock, log, indent + 1);
+            sKR = applyNewUnlock(sKR, publicMasterKey, signPrivateKey, cryptoInput.getPassphrase(), saveParcel.mNewUnlock, log, indent + 1);
         } catch (PGPException e) {
             return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
         }
@@ -460,7 +460,7 @@ public class PgpKeyOperation {
          * 4a. For each subkey change, generate new subkey binding certificate
          * 4b. For each subkey revocation, generate new subkey revocation certificate
          * 5. Generate and add new subkeys
-         * 6. If requested, change passphrase
+         * 6. If requested, change pin
          */
 
         log.add(LogType.MSG_MF, indent,
@@ -1134,23 +1134,7 @@ public class PgpKeyOperation {
                 return new PgpEditKeyResult(PgpEditKeyResult.RESULT_CANCELLED, log, null);
             }
 
-            // 6. If requested, change passphrase
-            if (saveParcel.mNewUnlock != null) {
-                progress(R.string.progress_modify_passphrase, 90);
-                log.add(LogType.MSG_MF_PASSPHRASE, indent);
-                indent += 1;
-
-                sKR = applyNewUnlock(sKR, masterPublicKey, masterPrivateKey,
-                        cryptoInput.getPassphrase(), saveParcel.mNewUnlock, log, indent);
-                if (sKR == null) {
-                    // The error has been logged above, just return a bad state
-                    return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
-                }
-
-                indent -= 1;
-            }
-
-            // 7. if requested, change PIN and/or Admin PIN on security token
+            // 6. if requested, change PIN and/or Admin PIN on security token
             if (saveParcel.mSecurityTokenPin != null) {
                 progress(R.string.progress_modify_pin, 90);
                 log.add(LogType.MSG_MF_PIN, indent);
@@ -1273,78 +1257,7 @@ public class PgpKeyOperation {
 
     }
 
-
-
     private static PGPSecretKeyRing applyNewUnlock(
-            PGPSecretKeyRing sKR,
-            PGPPublicKey masterPublicKey,
-            PGPPrivateKey masterPrivateKey,
-            Passphrase passphrase,
-            ChangeUnlockParcel newUnlock,
-            OperationLog log, int indent) throws PGPException {
-
-        if (newUnlock.mNewPassphrase != null) {
-            sKR = applyNewPassphrase(sKR, masterPublicKey, passphrase, newUnlock.mNewPassphrase, log, indent);
-
-            // if there is any old packet with notation data
-            if (hasNotationData(sKR)) {
-
-                log.add(LogType.MSG_MF_NOTATION_EMPTY, indent);
-
-                // add packet with EMPTY notation data (updates old one, but will be stripped later)
-                PGPContentSignerBuilder signerBuilder = new JcaPGPContentSignerBuilder(
-                        masterPrivateKey.getPublicKeyPacket().getAlgorithm(),
-                        PgpSecurityConstants.SECRET_KEY_BINDING_SIGNATURE_HASH_ALGO)
-                        .setProvider(Constants.BOUNCY_CASTLE_PROVIDER_NAME);
-                PGPSignatureGenerator sGen = new PGPSignatureGenerator(signerBuilder);
-                { // set subpackets
-                    PGPSignatureSubpacketGenerator hashedPacketsGen = new PGPSignatureSubpacketGenerator();
-                    hashedPacketsGen.setExportable(false, false);
-                    sGen.setHashedSubpackets(hashedPacketsGen.generate());
-                }
-                sGen.init(PGPSignature.DIRECT_KEY, masterPrivateKey);
-                PGPSignature emptySig = sGen.generateCertification(masterPublicKey);
-
-                masterPublicKey = PGPPublicKey.addCertification(masterPublicKey, emptySig);
-                sKR = PGPSecretKeyRing.insertSecretKey(sKR,
-                        PGPSecretKey.replacePublicKey(sKR.getSecretKey(), masterPublicKey));
-            }
-
-            return sKR;
-        }
-
-        if (newUnlock.mNewPin != null) {
-            sKR = applyNewPassphrase(sKR, masterPublicKey, passphrase, newUnlock.mNewPin, log, indent);
-
-            log.add(LogType.MSG_MF_NOTATION_PIN, indent);
-
-            // add packet with "pin" notation data
-            PGPContentSignerBuilder signerBuilder = new JcaPGPContentSignerBuilder(
-                    masterPrivateKey.getPublicKeyPacket().getAlgorithm(),
-                    PgpSecurityConstants.SECRET_KEY_BINDING_SIGNATURE_HASH_ALGO)
-                    .setProvider(Constants.BOUNCY_CASTLE_PROVIDER_NAME);
-            PGPSignatureGenerator sGen = new PGPSignatureGenerator(signerBuilder);
-            { // set subpackets
-                PGPSignatureSubpacketGenerator hashedPacketsGen = new PGPSignatureSubpacketGenerator();
-                hashedPacketsGen.setExportable(false, false);
-                hashedPacketsGen.setNotationData(false, true, "unlock.pin@sufficientlysecure.org", "1");
-                sGen.setHashedSubpackets(hashedPacketsGen.generate());
-            }
-            sGen.init(PGPSignature.DIRECT_KEY, masterPrivateKey);
-            PGPSignature emptySig = sGen.generateCertification(masterPublicKey);
-
-            masterPublicKey = PGPPublicKey.addCertification(masterPublicKey, emptySig);
-            sKR = PGPSecretKeyRing.insertSecretKey(sKR,
-                    PGPSecretKey.replacePublicKey(sKR.getSecretKey(), masterPublicKey));
-
-            return sKR;
-        }
-
-        throw new UnsupportedOperationException("PIN passphrases not yet implemented!");
-
-    }
-
-    private static PGPSecretKeyRing applyNewUnlockNew(
             PGPSecretKeyRing sKR,
             PGPPublicKey masterPublicKey,
             PGPPrivateKey privateSignKey,
@@ -1353,7 +1266,7 @@ public class PgpKeyOperation {
             OperationLog log, int indent) throws PGPException {
 
         if (newUnlock.mNewPassphrase != null) {
-            sKR = applyNewPassphraseNew(sKR, masterPublicKey, passphrase, newUnlock.mNewPassphrase, log, indent);
+            sKR = applyNewPassphrase(sKR, masterPublicKey, passphrase, newUnlock.mNewPassphrase, log, indent);
 
             // if there is any old packet with notation data
             if (hasNotationData(sKR)) {
@@ -1383,7 +1296,7 @@ public class PgpKeyOperation {
         }
 
         if (newUnlock.mNewPin != null) {
-            sKR = applyNewPassphraseNew(sKR, masterPublicKey, passphrase, newUnlock.mNewPin, log, indent);
+            sKR = applyNewPassphrase(sKR, masterPublicKey, passphrase, newUnlock.mNewPin, log, indent);
 
             log.add(LogType.MSG_MF_NOTATION_PIN, indent);
 
@@ -1429,72 +1342,8 @@ public class PgpKeyOperation {
         return false;
     }
 
+
     private static PGPSecretKeyRing applyNewPassphrase(
-            PGPSecretKeyRing sKR,
-            PGPPublicKey masterPublicKey,
-            Passphrase passphrase,
-            Passphrase newPassphrase,
-            OperationLog log, int indent) throws PGPException {
-
-        PGPDigestCalculator encryptorHashCalc = new JcaPGPDigestCalculatorProviderBuilder().build()
-                .get(PgpSecurityConstants.SECRET_KEY_ENCRYPTOR_HASH_ALGO);
-        PBESecretKeyDecryptor keyDecryptor = new JcePBESecretKeyDecryptorBuilder().setProvider(
-                Constants.BOUNCY_CASTLE_PROVIDER_NAME).build(passphrase.getCharArray());
-        // Build key encryptor based on new passphrase
-        PBESecretKeyEncryptor keyEncryptorNew = new JcePBESecretKeyEncryptorBuilder(
-                PgpSecurityConstants.SECRET_KEY_ENCRYPTOR_SYMMETRIC_ALGO, encryptorHashCalc,
-                PgpSecurityConstants.SECRET_KEY_ENCRYPTOR_S2K_COUNT)
-                .setProvider(Constants.BOUNCY_CASTLE_PROVIDER_NAME).build(newPassphrase.getCharArray());
-
-        // noinspection unchecked
-        for (PGPSecretKey sKey : new IterableIterator<PGPSecretKey>(sKR.getSecretKeys())) {
-            log.add(LogType.MSG_MF_PASSPHRASE_KEY, indent,
-                    KeyFormattingUtils.convertKeyIdToHex(sKey.getKeyID()));
-
-            boolean ok = false;
-
-            try {
-                // try to set new passphrase
-                sKey = PGPSecretKey.copyWithNewPassword(sKey, keyDecryptor, keyEncryptorNew);
-                ok = true;
-            } catch (PGPException e) {
-
-                // if this is the master key, error!
-                if (sKey.getKeyID() == masterPublicKey.getKeyID()) {
-                    log.add(LogType.MSG_MF_ERROR_PASSPHRASE_MASTER, indent+1);
-                    return null;
-                }
-
-                // being in here means decrypt failed, likely due to a bad passphrase try
-                // again with an empty passphrase, maybe we can salvage this
-                try {
-                    log.add(LogType.MSG_MF_PASSPHRASE_EMPTY_RETRY, indent+1);
-                    PBESecretKeyDecryptor emptyDecryptor =
-                            new JcePBESecretKeyDecryptorBuilder().setProvider(
-                                    Constants.BOUNCY_CASTLE_PROVIDER_NAME).build("".toCharArray());
-                    sKey = PGPSecretKey.copyWithNewPassword(sKey, emptyDecryptor, keyEncryptorNew);
-                    ok = true;
-                } catch (PGPException e2) {
-                    // non-fatal but not ok, handled below
-                }
-            }
-
-            if (!ok) {
-                // for a subkey, it's merely a warning
-                log.add(LogType.MSG_MF_PASSPHRASE_FAIL, indent+1,
-                        KeyFormattingUtils.convertKeyIdToHex(sKey.getKeyID()));
-                continue;
-            }
-
-            sKR = PGPSecretKeyRing.insertSecretKey(sKR, sKey);
-
-        }
-
-        return sKR;
-
-    }
-
-    private static PGPSecretKeyRing applyNewPassphraseNew(
             PGPSecretKeyRing sKR,
             PGPPublicKey masterPublicKey,
             Passphrase passphrase,

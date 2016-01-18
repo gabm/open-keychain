@@ -348,8 +348,7 @@ public class PgpKeyOperation {
 
     public PgpEditKeyResult changeKeyUnlock(CanonicalizedSecretKeyRing wsKR,
                                             CryptoInputParcel cryptoInput,
-                                            SaveKeyringParcel saveParcel)
-    {
+                                            SaveKeyringParcel saveParcel) {
         OperationLog log = new OperationLog();
         int indent = 0;
 
@@ -372,8 +371,7 @@ public class PgpKeyOperation {
             long signID = wsKR.getSecretSignId();
             secretSignKey = sKR.getSecretKey(signID);
 
-        } catch (PgpGeneralException e)
-        {
+        } catch (PgpGeneralException e) {
             return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
         }
 
@@ -413,15 +411,19 @@ public class PgpKeyOperation {
         }
 
         try {
-            applyNewUnlockNew(sKR, publicMasterKey, signPrivateKey, cryptoInput.getPassphrase(), saveParcel.mNewUnlock, log, indent+1);
-        } catch (PGPException e)
-        {
+            sKR = applyNewUnlockNew(sKR, publicMasterKey, signPrivateKey, cryptoInput.getPassphrase(), saveParcel.mNewUnlock, log, indent + 1);
+        } catch (PGPException e) {
             return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
         }
 
-        return new PgpEditKeyResult(OperationResult.RESULT_OK, log, new UncachedKeyRing(sKR));
+        if (sKR == null)
+        {
+            return new PgpEditKeyResult(PgpEditKeyResult.RESULT_ERROR, log, null);
+        } else {
+            log.add(LogType.MSG_MF_SUCCESS, indent);
+            return new PgpEditKeyResult(OperationResult.RESULT_OK, log, new UncachedKeyRing(sKR));
+        }
     }
-
     /** This method introduces a list of modifications specified by a SaveKeyringParcel to a
      * WrappedSecretKeyRing.
      *
@@ -443,6 +445,9 @@ public class PgpKeyOperation {
     public PgpEditKeyResult modifySecretKeyRing(CanonicalizedSecretKeyRing wsKR,
                                                 CryptoInputParcel cryptoInput,
                                                 SaveKeyringParcel saveParcel) {
+
+        if (saveParcel.mNewUnlock != null)
+            return changeKeyUnlock(wsKR, cryptoInput, saveParcel);
 
         OperationLog log = new OperationLog();
         int indent = 0;
@@ -1519,24 +1524,28 @@ public class PgpKeyOperation {
                 ok = true;
             } catch (PGPException e) {
 
-                // if this is the master key, error!
-                if ((sKey.getKeyID() == masterPublicKey.getKeyID()) && isDummy(sKR.getSecretKey())) {
-                    log.add(LogType.MSG_MF_ERROR_PASSPHRASE_MASTER, indent+1);
-                    return null;
+                // if this is the master key and its *not* a dummy key - error!
+                if ((sKey.getKeyID() == masterPublicKey.getKeyID())) {
+                    if (!isDummy(sKR.getSecretKey())) {
+                        log.add(LogType.MSG_MF_ERROR_PASSPHRASE_MASTER, indent+1);
+                        return null;
+                    } else {
+                        // being in here means decrypt failed, likely due to a bad passphrase try
+                        // again with an empty passphrase, maybe we can salvage this
+                        try {
+                            log.add(LogType.MSG_MF_PASSPHRASE_EMPTY_RETRY, indent+1);
+                            PBESecretKeyDecryptor emptyDecryptor =
+                                    new JcePBESecretKeyDecryptorBuilder().setProvider(
+                                            Constants.BOUNCY_CASTLE_PROVIDER_NAME).build("".toCharArray());
+                            sKey = PGPSecretKey.copyWithNewPassword(sKey, emptyDecryptor, keyEncryptorNew);
+                            ok = true;
+                        } catch (PGPException e2) {
+                            // non-fatal but not ok, handled below
+                        }
+                    }
+
                 }
 
-                // being in here means decrypt failed, likely due to a bad passphrase try
-                // again with an empty passphrase, maybe we can salvage this
-                try {
-                    log.add(LogType.MSG_MF_PASSPHRASE_EMPTY_RETRY, indent+1);
-                    PBESecretKeyDecryptor emptyDecryptor =
-                            new JcePBESecretKeyDecryptorBuilder().setProvider(
-                                    Constants.BOUNCY_CASTLE_PROVIDER_NAME).build("".toCharArray());
-                    sKey = PGPSecretKey.copyWithNewPassword(sKey, emptyDecryptor, keyEncryptorNew);
-                    ok = true;
-                } catch (PGPException e2) {
-                    // non-fatal but not ok, handled below
-                }
             }
 
             if (!ok) {
